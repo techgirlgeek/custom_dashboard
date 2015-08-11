@@ -1,0 +1,654 @@
+<?php
+/**
+ * @file
+ * custom dashboard functionality
+ */
+
+/**
+ * Implements hook_block_info().
+ *
+ * This hook declares what blocks are provided by the module.
+ */
+function custom_dashboard_block_info() {
+  $blocks['dashboard_address_block'] = array(
+    'info' => t('Student address'),
+    'visibility' => BLOCK_VISIBILITY_LISTED,
+    'pages' => 'dashboard',
+  );
+
+  $blocks['dashboard_my_staff'] = array(
+    'info' => t('Staff Assigned to Student Building/Room'),
+    'visibility' => BLOCK_VISIBILITY_LISTED,
+    'pages' => 'dashboard',
+  );
+
+  $blocks['dashboard_my_roommates'] = array(
+    'info' => t('Roommates assigned to same room'),
+    'visibility' => BLOCK_VISIBILITY_LISTED,
+    'pages' => 'dashboard',
+  );
+
+  $blocks['dashboard_want_to'] = array(
+    'info' => t('Dashboard tasks'),
+    'visibility' => BLOCK_VISIBILITY_LISTED,
+    'pages' => 'dashboard',
+  );
+
+  $blocks['dashboard_dining_balances'] = array(
+    'info' => t('Dashboard Dining Balances'),
+    'visibility' => BLOCK_VISIBILITY_LISTED,
+    'pages' => 'dashboard',
+  );
+
+  $blocks['dashboard_dining_info'] = array(
+    'info' => t('Dashboard Dining Info'),
+    'visibility' => BLOCK_VISIBILITY_LISTED,
+    'pages' => 'dashboard',
+  );
+
+  $blocks['dashboard_image'] = array(
+    'info' => t('Dashboard Person Image'),
+    'visibility' => BLOCK_VISIBILITY_LISTED,
+    'pages' => 'dashboard',
+  );
+
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ *
+ * This hook generates the contents of the blocks themselves.
+ */
+function custom_dashboard_block_view($delta = '') {
+
+  switch ($delta) {
+
+    case 'dashboard_address_block':
+      $block['subject'] = t('My Address');
+      $block['content'] = custom_dashboard_get_bldg_code();
+    break;
+
+    case 'dashboard_my_staff':
+      $block['subject'] = t('My Staff');
+      $block['content'] = custom_dashboard_get_staff();
+    break;
+
+    case 'dashboard_my_roommates':
+      $block['subject'] = t('My Roommates');
+      $block['content'] = custom_dashboard_get_roommates();
+    break;
+
+    case 'dashboard_want_to':
+      $block['subject'] = t('');
+      $block['content'] = custom_dashboard_want_to();
+    break;
+
+    case 'dashboard_dining_balances':
+      $block['subject'] = t('Dining Balance');
+      $block['content'] = dining_balances_plans();
+    break;
+
+    case 'dashboard_dining_info':
+      $block['subject'] = '';
+      $block['content'] = custom_dashboard_dining_info();
+    break;
+
+    case 'dashboard_image':
+      $block['subject'] = '';
+      $block['content'] = dashboard_picture_pic();
+    break;
+
+  }
+
+  return $block;
+}
+
+/**
+ * Get and format building address for students and CU staff
+ */
+function custom_dashboard_get_bldg_code() {
+
+  $user = custom_dashboard_get_student();
+  $uid = $user->uid;
+  $name = $user->name;
+  $hall_info = custom_dashboard_bldg_address($uid);
+
+  if (!isset($hall_info) || $hall_info['address'] == '') {
+    $address = custom_dashboard_get_business_address($uid);
+    if ($address) {
+      return array('#markup' =>
+        ucwords($address->field_business_address_organisation_name) . '<br />'
+        . ucwords(strtolower($address->field_business_address_thoroughfare)) . '&nbsp;'
+        . $address->field_business_address_premise . '<br />'
+        . $address->field_business_address_locality . ', '
+        . $address->field_business_address_administrative_area
+        . '&nbsp;&nbsp' . $address->field_business_address_postal_code );
+    } else {
+      return;
+    }
+  } else {
+    $address = $hall_info['address'];
+    $mailbox = custom_user_get_mailbox($name);
+
+    $address_complete = ucwords(strtolower($address->title))
+        . '<br />' . ucwords(strtolower($address->field_address_thoroughfare))
+        . '<br />' . $address->field_address_locality . ', '
+        . $address->field_address_administrative_area . '&nbsp;&nbsp;'
+        . $address->field_address_postal_code;
+
+    if ($mailbox) {
+      return array('#markup' =>
+        $mailbox . '&nbsp;' . $address_complete);
+    } else {
+      return array('#markup' => $address_complete);
+    }
+  }
+
+}
+
+/**
+ * Initial function for getting the staff information per building for logged in user.
+ */
+function custom_dashboard_get_staff() {
+
+  $user = custom_dashboard_get_student();
+  $uid = $user->uid;
+  $room_ra = custom_dashboard_get_ra($uid);
+  $hall_info = custom_dashboard_bldg_address($uid);
+  $building_info = $hall_info['address'];
+
+  if (isset($building_info)) {
+    $building_name = ucwords(strtolower($building_info->title));
+    $building_staff = custom_dashboard_get_bldg_staff($building_name);
+  }
+
+  if (isset($building_staff)) {
+    $staff = custom_dashboard_staff_info($building_staff);
+  }
+
+  if (isset($room_ra)) {
+    $ra_staff = custom_dashboard_staff_info($room_ra);
+  }
+
+  if (isset($staff) && isset($ra_staff)) {
+    $staff_info = $ra_staff . $staff;
+  } else if (isset($staff) && !isset($ra_staff)) {
+    $staff_info = $staff;
+  } else {
+    $staff_info = '';
+  }
+  return $staff_info;
+
+}
+
+/**
+ * Initial function to find roommates of logged in student
+ */
+function custom_dashboard_get_roommates() {
+
+  $user = custom_dashboard_get_student();
+  $uid = $user->uid;
+  $roommates = custom_dashboard_get_roommates_data($uid);
+
+  if (isset($roommates)) {
+    $roommate_info = custom_dashboard_roommates_block($roommates);
+  } else {
+    return;
+  }
+
+  return $roommate_info;
+}
+
+
+/**
+ * Function to get I Want To links for different roles.
+ */
+function custom_dashboard_want_to() {
+
+  $user = custom_dashboard_get_student();
+  $roles = $user->roles;
+  $hall = custom_dashboard_bldg_address($user->uid);
+
+  $want_links = '<ul class="menu">';
+
+  // Links for Residents that are not in Bear Creek, family housing, or an RA.
+  if (in_array('myroom resident', $roles) && !in_array('myroom ra', $roles) && $hall['code'] != 'BRCK') {
+    $want_links .= custom_dashboard_want_links('Apply to be an RA', 'http://housing.colorado.edu/RA');
+    $want_links .= custom_dashboard_want_links('Help with roommate issues', 'roomie-issues');
+    $want_links .= custom_dashboard_want_links('View Res Hall Handbook', 'http://housing.colorado.edu/policies-procedures/residence-hall-handbook');
+    $want_links .= custom_dashboard_want_links('Read my contract', 'http://housing.colorado.edu/policies-procedures/contract');
+  }
+
+  // Links for residents that live in Bear Creek.
+  if (in_array('myroom resident', $roles) && $hall['code'] == 'BRCK') {
+    $want_links .= custom_dashboard_want_links('View the handbook', 'https://bearcreek.colorado.edu/sites/default/files/2013_2014_Resident_Handbook.pdf');
+    $want_links .= custom_dashboard_want_links('Go to Bear Creek Site', 'https://bearcreek.colorado.edu');
+  }
+
+  // Links specific to RA's.
+  if (in_array('myroom ra', $roles)) {
+    $want_links .= custom_dashboard_want_links('View Resident Profiles', 'myroom-profiles');
+    $want_links .= custom_dashboard_want_links('View Roommate Agreements', 'myroom-agreements');
+    $want_links .= custom_dashboard_want_links('Email Students', 'myroom-profiles-emails');
+  }
+
+  // Links common to all residents.
+  if (in_array('myroom resident', $roles)) {
+    $want_links .= custom_dashboard_want_links('Get Tutoring', 'https://housing.cololrado.edu/tutoring', 1);
+  }
+
+  // Links specific to HD's.
+  if (in_array('myroom hd', $roles) || in_array('myroom Hall Director', $roles) || in_array('myroom AHD', $roles)) {
+    $want_links .= custom_dashboard_want_links('View HD Report', 'reports/myroom-res-life-report-hd');
+    $want_links .= custom_dashboard_want_links('MyRoom Admin', 'admin/myroom/data/agreement-report');
+    $want_links .= custom_dashboard_want_links('Email Students', 'reports/myroom-hd-report-ra');
+  }
+
+  // Links specific to AC's.
+  if (in_array('myroom ac', $roles) || in_array('myroom Area coordinator', $roles)) {
+    $want_links .= custom_dashboard_want_links('View AC Report', 'reports/myroom-res-life-report-ac');
+  }
+
+  // Links specific to reslife ADs.
+  if (in_array('reslife AD', $roles)) {
+    $want_links .= custom_dashboard_want_links('View Roommate Agreements', 'admin/myroom/data/agreement-report');
+    $want_links .= custom_dashboard_want_links('View AC/HD Reports', 'admin/reports/hd-ac-report-listing/ac');
+  }
+
+  // Links to MyRoom Reports
+  if (in_array('administrator', $roles) || in_array('myroom admin', $roles) || in_array('myroom semi-admin', $roles)) {
+    $want_links .= custom_dashboard_want_links('MyRoom Admin', 'admin/myroom/data/agreement-report');
+    $want_links .= custom_dashboard_want_links('View AC/HD Report', 'admin/reports/hd-ac-report-listing/ac');
+  }
+
+  // Links specific to content editors (MARCOMM)
+  if (in_array('content editor', $roles) || in_array('event administrator', $roles)) {
+    $want_links .= custom_dashboard_want_links('Content Admin', 'admin/content/events');
+  }
+
+  // Links specific to content editors (MARCOMM)
+  if (in_array('content editor', $roles)) {
+    $want_links .= custom_dashboard_want_links('Add Dashboard Ad', 'block/add/dashboard-ads');
+  }
+
+  // Link for any roles with perms on events.
+  if (in_array('myroom ra', $roles) || in_array('myroom hd', $roles) || in_array('myroom Hall Director', $roles) || in_array('myroom AHD', $roles) || in_array('myroom ac', $roles) || in_array('myroom Area coordinator', $roles) || in_array('event administrator', $roles) || in_array('content editor', $roles) || in_array('myroom admin', $roles) || in_array('myroom semi-admin', $roles) || in_array('administrator', $roles) || in_array('reslife AD', $roles)) {
+    $want_links .= custom_dashboard_want_links('Events Administration', 'event-administration');
+  }
+
+  if (in_array('myroom semi-admin', $roles)) {
+    $want_links .= custom_dashboard_want_links('Add a Bulletin Board', 'node/add/bulletin-boards');
+    $want_links .= custom_dashboard_want_links('Edit a Bulletin Board', 'admin/content/bulletin_boards');
+  }
+
+  $default_links = custom_dashboard_want_links('Apply for housing', 'http://hdsapps.colorado.edu/StarRezPortal', 1);
+  $default_links .= custom_dashboard_want_links('Catch a bus on campus', 'http://buffbus.etaspot.net', 1);
+  $default_links .= custom_dashboard_want_links('Cable Trouble-Shooting Guide', 'sites/all/themes/oncampus_omega4/files/CU Cable Trouble Shooting Guide.pdf', 1);
+
+
+  $want_links .= $default_links . '</ul>';
+
+  return $want_links;
+
+}
+
+/**
+ * Links on the My Dining tab
+ */
+function custom_dashboard_dining_info() {
+
+  $dining_links = '<ul>';
+  $dining_links .= '<li>' . l('Add Campus Cash', 'https://services.jsatech.com/payment.php?cid=59&)', array('attributes' =>
+      array(
+        'class' => array('campus-cash-link'),
+        'target' => array('_blank'),
+      )
+    )
+  ) . '</li>';
+
+  $dining_links .= '<li>' . l('Buy Meals & Munch Money', 'http://hdsapps.colorado.edu/StarRezPortal', array('attributes' =>
+      array(
+        'class' => 'block-meals-link',
+        'target' => '_blank'
+      )
+    )
+  ) . '</li>';
+
+  $dining_links .= '<li>' . l('Nutritional Information', 'http://hdsmenus.colorado.edu/netnutrition', array('attributes' =>
+      array(
+        'class' => array('net-nutrition-link'),
+        'target' => array('_blank')
+      )
+    )
+  ) . '</li>';
+
+  $dining_links .= '</ul>';
+
+  return $dining_links;
+}
+
+function custom_dashboard_want_links($text, $url, $new_window = NULL) {
+
+  $want_class = '<li class="want-to">';
+  if (!is_null($new_window)){
+    $attributes = array('attributes' => array('class' => array('want-to-link'), 'target' => array('_blank')));
+  } else {
+    $attributes = array('attributes' => array('class' => array('want-to-link')));
+  }
+  $end = '</li>';
+
+  $want_link = $want_class . l($text, $url, $attributes) . $end;
+
+  return $want_link;
+}
+
+/**
+ * Format staff information to use in block
+ */
+function custom_dashboard_staff_info($staffs) {
+
+  $staff_info = '';
+  foreach ($staffs as $staff) {
+    if (!is_null($staff->full_name)) {
+      $staff_name =  $staff->full_name;
+    } else {
+      $staff_name = '';
+    }
+
+    if ($staff->picture != 0 ) {
+      $pic = file_load($staff->picture);
+      $staff_pic = dashboard_picture_get_picture($pic->uri, $staff_name);
+    } else {
+      $staff_pic = dashboard_picture_get_picture('/sites/all/themes/oncampus_omega4/images/placeholder_icon_blue.png', $staff_name);
+    }
+
+    if (isset($staff->type)) {
+      $staff_type = $staff->type;
+    } else {
+      $staff_type = 'Resident Advisor';
+    }
+
+    $email = l('Email ' . $staff_type, 'mailto:' . $staff->mail, array('absolute' => TRUE));
+
+    if ($staff_name != '') {
+      $staff_info .= '<div class="staff">' . $staff_pic . '<span class="staff-name">' . $staff_name . ',</span> <br /> <span class="staff-type">' . $staff_type . '</span> <br /> <span class="staff-email">' . $email . '</span> <br /> <span class="staff-phone">' . $staff->field_my_phone_number_value . '</span> </div>';
+    } else {
+      $staff_info .= '<div class="staff">' . $staff_pic . '<span class="staff-type">' . $staff_type . '</span> <br /> <span class="staff-email">' . $email . '</span> <br /> <span class="staff-phone">' . $staff->field_my_phone_number_value . '</span> </div>';
+    }
+  }
+
+  return $staff_info;
+
+}
+
+/**
+ * Get roommate information to use in block
+ */
+function custom_dashboard_roommates_block($roomie) {
+
+  $roomie_info = '';
+  foreach ($roomie as $roommate) {
+
+    if ($roommate->full_name != '') {
+      $roommate_name =  $roommate->full_name;
+    } else {
+      $roommate_name = '';
+    }
+
+    // If the image exists in the user profile use that image.
+    if ($roommate->picture != 0 ) {
+      $pic = file_load($roommate->picture);
+      $roommate_pic = dashboard_picture_get_picture($pic->uri, $roommate_name);
+    } else {
+      $roommate_pic = dashboard_picture_get_picture('/sites/all/themes/oncampus_omega4/images/placeholder_icon_gold.png', $roommate_name);
+    }
+
+    $email = l($roommate->mail, 'mailto:' . $roommate->mail, array('absolute' => TRUE));
+
+    if ($roommate_name != '') {
+      $roomie_info .= '<div class="roommie">' . $roommate_pic . '<span class="roommate-name">' . $roommate_name . '</span> <br />' . $email . '<br /> </div>';
+    } else {
+      $roomie_info .= '<div class="roommie">' . $roommate_pic . $email .  '</div>';
+    }
+  }
+
+  return $roomie_info;
+
+}
+
+function custom_dashboard_get_student() {
+  global $user;
+  return $user;
+}
+
+function custom_dashboard_bldg_address($uid) {
+
+  $bldg_result = custom_dashboard_room_query($uid);
+  $num_of_results = $bldg_result->rowCount();
+
+  if ($num_of_results < 1) {
+    return;
+  } else {
+    foreach($bldg_result as $value) {
+      $building_code = custom_dashboard_get_code($value);
+      $address = custom_dashboard_get_address($building_code);
+    }
+    return array('code'=>$building_code, 'address' => $address);
+  }
+
+}
+
+function custom_dashboard_get_code($value) {
+  $parts = explode('_', $value->title);
+  $building_code = $parts[0];
+
+  return $building_code;
+}
+
+function custom_dashboard_room_query($uid) {
+
+  $bldg_query = db_select('field_data_field_mr_students', 's');
+  $bldg_query
+    -> fields('r', array('id', 'title'))
+    -> condition('s.field_mr_students_target_id', $uid)
+    -> join('myroom_room', 'r', 's.entity_id = r.id');
+  $bldg_query
+    ->range(0,1);
+
+  $bldg_result = $bldg_query->execute();
+
+  return $bldg_result;
+}
+
+/**
+ * Get a building's address based on the building code for the My Info address.
+ */
+function custom_dashboard_get_address($building_code) {
+
+  $query = db_select('field_data_field_facman_building_code', 'f');
+  $query
+    -> fields('a', array('field_address_thoroughfare', 'field_address_locality','field_address_administrative_area', 'field_address_postal_code'))
+    -> fields('n', array('title'));
+  $query -> join('field_data_field_address', 'a', 'a.entity_id = f.entity_id');
+  $query -> join('node', 'n', 'n.nid = f.entity_id');
+  $query -> join('field_data_field_hds_building_code', 'h', 'a.entity_id = h.entity_id');
+  $query -> condition('a.bundle', 'building');
+  $db_or = db_or();
+    $db_or -> condition('f.field_facman_building_code_value', $building_code);
+    $db_or -> condition('h.field_hds_building_code_value', $building_code);
+
+  $query -> condition($db_or);
+
+  $result = $query->execute();
+
+  foreach ($result as $key => $building_info) {
+    return $building_info;
+  }
+
+}
+
+/** 
+ * Get a business address for CU staff
+ */
+function custom_dashboard_get_business_address($uid) {
+
+  $address_query = db_select('field_data_field_business_address', 'ba');
+  $address_query
+    -> fields('ba', array('field_business_address_administrative_area', 'field_business_address_locality', 'field_business_address_postal_code', 'field_business_address_thoroughfare', 'field_business_address_premise', 'field_business_address_organisation_name'));
+  $address_query -> condition('ba.entity_id', $uid);
+
+  $address_result = $address_query->execute();
+
+  foreach ($address_result as $address) {
+    return $address;
+  }
+
+}
+
+/**
+ * Get the building staff AC, HD, AHD, using the building ID
+ */
+function custom_dashboard_get_bldg_staff($building_name) {
+
+  $bldg_id = custom_dashboard_get_bldg_id($building_name);
+  $bldg_staff = custom_dashboard_get_staff_query($bldg_id);
+
+  return $bldg_staff;
+
+}
+
+/**
+ * Get the facility id of the building for accessing staff information
+ */
+function custom_dashboard_get_bldg_id($building_name) {
+
+  $bldgid_query = db_select('myroom_facility', 'f');
+  $bldgid_query
+    -> fields('f', array('id'))
+    -> condition('f.type', 'building')
+    -> condition('f.title', $building_name);
+
+  $bldgid_result = $bldgid_query->execute();
+
+  foreach ($bldgid_result as $value) {
+    return $value->id;
+  }
+
+}
+
+/**
+ * Get staff information based on building id
+ */
+function custom_dashboard_get_staff_query($bldg_id) {
+
+  $staff_query = db_select('myroom_facility', 'f');
+  $staff_query
+    -> fields('f', array('title'))
+    -> fields('o', array('field_mrf_owners_target_id'))
+    -> fields('s', array('user_id', 'type'))
+    -> fields('u', array('name', 'mail', 'picture'))
+    -> fields('p', array('field_my_phone_number_value'));
+  $staff_query
+    -> addExpression("CONCAT(fn.field_first_name_value, ' ', ln.field_last_name_value)", 'full_name');
+  $staff_query
+    -> condition('f.type', 'building')
+    -> condition('f.id', $bldg_id)
+    -> join('field_data_field_mrf_owners', 'o', 'o.entity_id = f.id');
+  $staff_query
+    -> join('myroom_staff_item', 's', 's.id = o.field_mrf_owners_target_id');
+  $staff_query
+    -> join('users', 'u', 'u.uid = s.user_id');
+  $staff_query
+    -> leftJoin('field_data_field_my_phone_number', 'p', 'p.entity_id = u.uid');
+  $staff_query
+    -> leftJoin('field_data_field_first_name', 'fn', 'u.uid = fn.entity_id AND fn.bundle = :user', array(':user' => 'user'));
+  $staff_query
+    -> leftJoin('field_data_field_last_name', 'ln', 'u.uid = ln.entity_id AND ln.bundle = :user', array(':user' => 'user'));
+  $staff_query
+    -> orderBy('o.delta');
+
+  $staff_result = $staff_query->execute();
+
+  $staff_array = array();
+  foreach ($staff_result as $key => $value) {
+    $staff_array[$key] = $value;
+  }
+
+  return $staff_array;
+
+}
+
+/**
+ * Get RA(s) information from UID of student
+ */
+function custom_dashboard_get_ra($uid) {
+
+  $ra_query = db_select('users', 'u');
+  $ra_query
+    -> fields('u', array('uid', 'name', 'mail', 'picture'))
+    -> fields('p', array('field_my_phone_number_value'));
+  $ra_query
+    -> addExpression("CONCAT(fn.field_first_name_value, ' ', ln.field_last_name_value)", 'full_name');
+  $ra_query
+    -> leftJoin('field_data_field_my_phone_number', 'p', 'p.entity_id = u.uid');
+  $ra_query
+    -> leftJoin('field_data_field_first_name', 'fn', 'u.uid = fn.entity_id AND fn.bundle = :user', array(':user' => 'user'));
+  $ra_query
+    -> leftJoin('field_data_field_last_name', 'ln', 'u.uid = ln.entity_id AND ln.bundle = :user', array(':user' => 'user'));
+  $ra_query
+    -> join('field_data_field_mr_res_adv', 'ra', 'ra.field_mr_res_adv_target_id = u.uid');
+  $ra_query
+    -> join('field_data_field_mr_rooms_adv', 'rm', 'rm.entity_id = ra.entity_id');
+  $ra_query
+    -> join('field_data_field_mr_students', 'st', 'st.entity_id = rm.field_mr_rooms_adv_target_id');
+  $ra_query
+    -> condition('st.field_mr_students_target_id', $uid);
+
+  $ra_result = $ra_query->execute();
+
+  $ra_array = array();
+  foreach ($ra_result as $key => $ra) {
+    $ra_array[$key] = $ra;
+  }
+
+  return $ra_array;
+
+}
+
+function custom_dashboard_get_roommates_data($uid) {
+
+  $room_result = custom_dashboard_room_query($uid);
+  $num_of_results = $room_result->rowCount();
+
+  if ($num_of_results < 1) {
+    return;
+  } else {
+    foreach($room_result as $room) {
+      $ruid_query = db_select('field_data_field_mr_students', 's')
+        -> fields('s', array('field_mr_students_target_id'))
+        -> fields('u', array('uid', 'name', 'mail', 'picture'));
+      $ruid_query
+        -> addExpression("CONCAT(fn.field_first_name_value, ' ', ln.field_last_name_value)", 'full_name');
+      $ruid_query
+        -> join('users', 'u', 'u.uid = s.field_mr_students_target_id');
+      $ruid_query
+        -> leftJoin('field_data_field_first_name', 'fn', 'u.uid = fn.entity_id AND fn.bundle = :user', array(':user' => 'user'));
+      $ruid_query
+        -> leftJoin('field_data_field_last_name', 'ln', 'u.uid = ln.entity_id AND ln.bundle = :user', array(':user' => 'user'));
+      $ruid_query
+        -> condition('s.field_mr_students_target_id', $uid, '!=')
+        -> condition('s.entity_id', $room->id);
+
+      $ruid_result = $ruid_query->execute();
+
+      $roommate_array = array();
+      foreach ($ruid_result as $key => $ruid) {
+        $roommate_array[$key] = $ruid;
+      }
+    }
+
+    return $roommate_array;
+  }
+
+}

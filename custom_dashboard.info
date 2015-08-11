@@ -1,0 +1,9 @@
+name = Custom Dashboard
+description = Dashboard module - custom code around the dashboards
+core = 7.x
+package = OnCampus
+
+dependencies[] = dining_balances
+dependencies[] = dashboard_picture
+dependencies[] = custom_user
+dependencies[] = myroom_related
